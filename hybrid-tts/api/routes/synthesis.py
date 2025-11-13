@@ -1,9 +1,9 @@
 """
 Text-to-Speech synthesis endpoints with hybrid caching
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional, Dict, Any
 import structlog
 
@@ -18,6 +18,8 @@ from api.routes.monitoring import (
     synthesis_latency_seconds,
     audio_bytes_total,
 )
+from config import settings
+from api.rate_limit import limiter, LIMITS
 
 logger = structlog.get_logger()
 
@@ -25,20 +27,34 @@ router = APIRouter()
 
 
 class SynthesisRequest(BaseModel):
-    """Request model for TTS synthesis"""
+    """Request model for TTS synthesis with security limits"""
 
-    text: str = Field(..., description="Text to synthesize", min_length=1)
-    voice: Optional[str] = Field(None, description="Voice name/ID")
+    text: str = Field(
+        ...,
+        description="Text to synthesize",
+        min_length=1,
+        max_length=settings.MAX_TEXT_LENGTH
+    )
+    voice: Optional[str] = Field(None, description="Voice name/ID", max_length=100)
     use_cache: bool = Field(True, description="Whether to use cache")
     enable_matching: bool = Field(
         True, description="Enable fuzzy/semantic matching"
     )
     template_id: Optional[str] = Field(
-        None, description="Template ID if using template"
+        None, description="Template ID if using template", max_length=100
     )
     slot_values: Optional[Dict[str, Any]] = Field(
         None, description="Slot values for template"
     )
+
+    @validator('text')
+    def validate_text_length(cls, v):
+        """Validate text doesn't exceed limits"""
+        if len(v.strip()) == 0:
+            raise ValueError("Text cannot be empty")
+        if len(v) > settings.MAX_TEXT_LENGTH:
+            raise ValueError(f"Text cannot exceed {settings.MAX_TEXT_LENGTH} characters")
+        return v.strip()
 
 
 class SynthesisResponse(BaseModel):
@@ -53,9 +69,14 @@ class SynthesisResponse(BaseModel):
 
 
 @router.post("/synthesize", response_model=SynthesisResponse)
-async def synthesize_speech(request: SynthesisRequest):
+@limiter.limit(LIMITS["synthesis"]) if settings.ENABLE_RATE_LIMITING else lambda x: x
+async def synthesize_speech(http_request: Request, request: SynthesisRequest):
     """
     Main synthesis endpoint with hybrid matching pipeline
+
+    Security:
+    - Rate limited to 10 requests per minute per IP
+    - Maximum text length: 5000 characters
 
     Process:
     1. Try exact cache hit
@@ -232,11 +253,33 @@ async def synthesize_speech(request: SynthesisRequest):
 
 
 @router.post("/synthesize/batch")
-async def synthesize_batch(texts: list[str], voice: Optional[str] = None):
+@limiter.limit(LIMITS["batch"]) if settings.ENABLE_RATE_LIMITING else lambda x: x
+async def synthesize_batch(http_request: Request, texts: list[str], voice: Optional[str] = None):
     """
     Batch synthesis for multiple texts
+
+    Security:
+    - Rate limited to 5 requests per minute per IP
+    - Maximum batch size: 100 items
+    - Each text limited to 5000 characters
+
     Returns array of audio data with metadata
     """
+    # Validate batch size
+    if len(texts) > settings.MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Batch size exceeds maximum of {settings.MAX_BATCH_SIZE} items"
+        )
+
+    # Validate each text length
+    for i, text in enumerate(texts):
+        if len(text) > settings.MAX_TEXT_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Text at index {i} exceeds maximum length of {settings.MAX_TEXT_LENGTH} characters"
+            )
+
     results = []
 
     for text in texts:
@@ -244,7 +287,7 @@ async def synthesize_batch(texts: list[str], voice: Optional[str] = None):
             request = SynthesisRequest(text=text, voice=voice)
             # Note: This is a simplified version
             # In production, you'd want to optimize this
-            result = await synthesize_speech(request)
+            result = await synthesize_speech(http_request, request)
             results.append(
                 {"text": text, "success": True, "audio_available": True}
             )
@@ -258,11 +301,20 @@ async def synthesize_batch(texts: list[str], voice: Optional[str] = None):
 
 
 @router.post("/synthesize/template")
+@limiter.limit(LIMITS["synthesis"]) if settings.ENABLE_RATE_LIMITING else lambda x: x
 async def synthesize_from_template(
-    template_id: str, slot_values: Dict[str, Any], voice: Optional[str] = None
+    http_request: Request,
+    template_id: str,
+    slot_values: Dict[str, Any],
+    voice: Optional[str] = None
 ):
     """
     Synthesize speech from template
+
+    Security:
+    - Rate limited to 10 requests per minute per IP
+    - Template output limited to 5000 characters
+
     This is the recommended way for structured responses
     """
     try:
@@ -282,7 +334,7 @@ async def synthesize_from_template(
             slot_values=slot_values,
         )
 
-        return await synthesize_speech(request)
+        return await synthesize_speech(http_request, request)
 
     except HTTPException:
         raise

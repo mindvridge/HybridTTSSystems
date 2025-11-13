@@ -92,6 +92,33 @@ class Settings(BaseSettings):
     TARGET_CACHE_HIT_RATE: float = 0.80  # 80%
     TARGET_COST_REDUCTION: float = 0.70  # 70%
 
+    # Security Settings
+    API_REQUIRE_AUTH: bool = True  # Require API key for admin endpoints
+    API_KEY_ENABLED: bool = True
+
+    # Rate Limiting
+    ENABLE_RATE_LIMITING: bool = True
+    RATE_LIMIT_SYNTHESIS: str = "10/minute"
+    RATE_LIMIT_BATCH: str = "5/minute"
+    RATE_LIMIT_ADMIN: str = "5/hour"
+    RATE_LIMIT_PUBLIC: str = "100/minute"
+
+    # Request Limits
+    MAX_TEXT_LENGTH: int = 5000  # Maximum text length for synthesis
+    MAX_BATCH_SIZE: int = 100  # Maximum batch size
+    MAX_REQUEST_SIZE_MB: int = 10  # Maximum request body size
+
+    # CORS Configuration
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8000"  # Comma-separated
+
+    # Security Headers
+    ENABLE_SECURITY_HEADERS: bool = True
+    ENABLE_HTTPS_REDIRECT: bool = False  # Set to True in production with HTTPS
+
+    # Audit Logging
+    ENABLE_AUDIT_LOG: bool = True
+    AUDIT_LOG_RETENTION_DAYS: int = 90
+
     class Config:
         env_file = ".env"
         case_sensitive = True

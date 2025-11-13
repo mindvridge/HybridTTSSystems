@@ -1,7 +1,7 @@
 """
 Main FastAPI application for Hybrid TTS Cost Optimizer
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import structlog
@@ -13,6 +13,14 @@ from matching.pipeline import matching_pipeline
 from templates.loader import template_manager
 from monitoring import metrics_collector
 from api.middleware import MonitoringMiddleware
+
+# Import security components
+from api.rate_limit import limiter, LIMITS, rate_limit_error_handler
+from api.auth import verify_api_key, APIKeyManager
+from api.security_headers import SecurityHeadersMiddleware
+from api.request_limits import RequestSizeLimitMiddleware
+from api.audit_log import AuditLog, log_admin_operation
+from slowapi.errors import RateLimitExceeded
 
 # Configure structured logging
 structlog.configure(
@@ -65,13 +73,37 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
+# Security: Rate Limiting
+if settings.ENABLE_RATE_LIMITING:
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_error_handler)
+    logger.info("rate_limiting_enabled", limits=LIMITS)
+
+# Security: Request Size Limits
+app.add_middleware(RequestSizeLimitMiddleware, max_size_mb=settings.MAX_REQUEST_SIZE_MB)
+logger.info("request_size_limits_enabled", max_size_mb=settings.MAX_REQUEST_SIZE_MB)
+
+# Security: Security Headers
+if settings.ENABLE_SECURITY_HEADERS:
+    app.add_middleware(SecurityHeadersMiddleware)
+    logger.info("security_headers_enabled")
+
+# CORS middleware - Restrict origins in production
+cors_origins = settings.CORS_ORIGINS.split(',') if settings.CORS_ORIGINS else ["*"]
+if settings.DEBUG:
+    # In development, be more permissive
+    cors_origins = ["*"]
+    logger.warning("cors_permissive_mode", message="CORS allows all origins (DEBUG mode)")
+else:
+    logger.info("cors_restricted_mode", allowed_origins=cors_origins)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],  # Only allow necessary methods
+    allow_headers=["Content-Type", "X-API-Key"],
+    max_age=600,
 )
 
 # Monitoring middleware
@@ -143,15 +175,156 @@ async def get_system_stats():
 
 
 @app.post("/api/v1/cache/clear")
-async def clear_cache():
-    """Clear entire cache (admin operation)"""
+@limiter.limit(LIMITS["admin"]) if settings.ENABLE_RATE_LIMITING else lambda x: x
+async def clear_cache(
+    request: Request,
+    api_key: str = Depends(verify_api_key) if settings.API_REQUIRE_AUTH else None
+):
+    """
+    Clear entire cache (admin operation)
+
+    Requires:
+    - API key authentication (X-API-Key header)
+    - Rate limited to 5 requests per hour
+    """
     try:
+        # Log admin operation
+        if settings.ENABLE_AUDIT_LOG:
+            await log_admin_operation(
+                operation="cache_clear",
+                api_key=api_key or "unauthenticated",
+                client_ip=request.client.host if request.client else "unknown",
+                details={"cache_stats_before": cache_manager.get_stats()}
+            )
+
         cache_manager.clear()
-        logger.warning("cache_cleared_via_api")
+
+        logger.warning(
+            "cache_cleared_via_api",
+            api_key=api_key.split(':')[0] if api_key and ':' in api_key else api_key,
+            client_ip=request.client.host if request.client else "unknown"
+        )
+
         return {"status": "success", "message": "Cache cleared"}
     except Exception as e:
         logger.error("cache_clear_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to clear cache")
+
+
+@app.post("/api/v1/admin/api-keys/create")
+@limiter.limit(LIMITS["admin"]) if settings.ENABLE_RATE_LIMITING else lambda x: x
+async def create_api_key(
+    request: Request,
+    name: str,
+    api_key: str = Depends(verify_api_key) if settings.API_REQUIRE_AUTH else None
+):
+    """
+    Create a new API key (admin operation)
+
+    Requires existing API key for authentication.
+    Use this to create additional API keys for services or users.
+    """
+    try:
+        # Log admin operation
+        if settings.ENABLE_AUDIT_LOG:
+            await log_admin_operation(
+                operation="api_key_create",
+                api_key=api_key or "unauthenticated",
+                client_ip=request.client.host if request.client else "unknown",
+                details={"new_key_name": name}
+            )
+
+        public_key, full_key = APIKeyManager.create_api_key(name)
+
+        logger.info(
+            "api_key_created",
+            public_key=public_key,
+            created_by=api_key.split(':')[0] if api_key and ':' in api_key else api_key
+        )
+
+        return {
+            "status": "success",
+            "public_key": public_key,
+            "api_key": full_key,
+            "warning": "Save this API key securely. It will not be shown again."
+        }
+    except Exception as e:
+        logger.error("api_key_creation_failed", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to create API key")
+
+
+@app.get("/api/v1/admin/api-keys/list")
+@limiter.limit(LIMITS["admin"]) if settings.ENABLE_RATE_LIMITING else lambda x: x
+async def list_api_keys(
+    request: Request,
+    api_key: str = Depends(verify_api_key) if settings.API_REQUIRE_AUTH else None
+):
+    """List all API keys (public identifiers only)"""
+    try:
+        keys = APIKeyManager.list_api_keys()
+
+        return {
+            "status": "success",
+            "api_keys": keys,
+            "count": len(keys)
+        }
+    except Exception as e:
+        logger.error("api_key_list_failed", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to list API keys")
+
+
+@app.delete("/api/v1/admin/api-keys/{public_key}")
+@limiter.limit(LIMITS["admin"]) if settings.ENABLE_RATE_LIMITING else lambda x: x
+async def revoke_api_key(
+    request: Request,
+    public_key: str,
+    api_key: str = Depends(verify_api_key) if settings.API_REQUIRE_AUTH else None
+):
+    """Revoke an API key"""
+    try:
+        # Log admin operation
+        if settings.ENABLE_AUDIT_LOG:
+            await log_admin_operation(
+                operation="api_key_revoke",
+                api_key=api_key or "unauthenticated",
+                client_ip=request.client.host if request.client else "unknown",
+                details={"revoked_key": public_key}
+            )
+
+        success = APIKeyManager.revoke_api_key(public_key)
+
+        if success:
+            return {"status": "success", "message": f"API key {public_key} revoked"}
+        else:
+            raise HTTPException(status_code=404, detail="API key not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("api_key_revocation_failed", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to revoke API key")
+
+
+@app.get("/api/v1/admin/audit-log")
+@limiter.limit(LIMITS["admin"]) if settings.ENABLE_RATE_LIMITING else lambda x: x
+async def get_audit_log(
+    request: Request,
+    limit: int = 100,
+    event_filter: str = None,
+    api_key: str = Depends(verify_api_key) if settings.API_REQUIRE_AUTH else None
+):
+    """Get audit log entries (admin only)"""
+    try:
+        entries = await AuditLog.get_audit_log(limit=limit, event_filter=event_filter)
+        stats = await AuditLog.get_audit_stats()
+
+        return {
+            "status": "success",
+            "entries": entries,
+            "stats": stats
+        }
+    except Exception as e:
+        logger.error("audit_log_retrieval_failed", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve audit log")
 
 
 @app.exception_handler(Exception)

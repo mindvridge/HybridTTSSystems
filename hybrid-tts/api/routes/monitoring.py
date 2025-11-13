@@ -1,13 +1,17 @@
 """
 Monitoring, metrics, and dashboard endpoints
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import Response, HTMLResponse
 from typing import Optional
 import structlog
 from datetime import datetime, timedelta
 
 from monitoring import metrics_collector
+from config import settings
+from api.rate_limit import limiter, LIMITS
+from api.auth import verify_api_key
+from api.audit_log import log_admin_operation
 from prometheus_client import (
     Counter,
     Histogram,
@@ -486,12 +490,36 @@ async def get_dashboard():
 
 
 @router.post("/flush")
-async def flush_metrics():
+@limiter.limit(LIMITS["admin"]) if settings.ENABLE_RATE_LIMITING else lambda x: x
+async def flush_metrics(
+    request: Request,
+    api_key: str = Depends(verify_api_key) if settings.API_REQUIRE_AUTH else None
+):
     """
-    Manually flush metrics to disk
+    Manually flush metrics to disk (admin operation)
+
+    Requires:
+    - API key authentication (X-API-Key header)
+    - Rate limited to 5 requests per hour
     """
     try:
+        # Log admin operation
+        if settings.ENABLE_AUDIT_LOG:
+            await log_admin_operation(
+                operation="metrics_flush",
+                api_key=api_key or "unauthenticated",
+                client_ip=request.client.host if request.client else "unknown",
+                details={}
+            )
+
         metrics_collector.flush()
+
+        logger.warning(
+            "metrics_flushed_via_api",
+            api_key=api_key.split(':')[0] if api_key and ':' in api_key else api_key,
+            client_ip=request.client.host if request.client else "unknown"
+        )
+
         return {"status": "success", "message": "Metrics flushed to disk"}
     except Exception as e:
         logger.error("metrics_flush_failed", error=str(e))
