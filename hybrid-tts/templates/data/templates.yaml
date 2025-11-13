@@ -1,0 +1,186 @@
+# Template definitions for Hybrid TTS System
+# POC: Banking Balance Inquiry Domain
+
+templates:
+  # Static greeting templates (can be fully pre-recorded)
+  - id: greeting_morning
+    pattern: "좋은 아침입니다"
+    slots: []
+    category: greeting
+    description: "Morning greeting"
+    pre_recorded: true
+
+  - id: greeting_afternoon
+    pattern: "안녕하세요"
+    slots: []
+    category: greeting
+    description: "General greeting"
+    pre_recorded: true
+
+  - id: greeting_evening
+    pattern: "좋은 저녁입니다"
+    slots: []
+    category: greeting
+    description: "Evening greeting"
+    pre_recorded: true
+
+  # Balance inquiry templates (parametric)
+  - id: balance_inquiry_result
+    pattern: "{customer_name}님의 계좌 잔액은 {balance}원입니다"
+    slots:
+      - customer_name
+      - balance
+    category: banking
+    description: "Balance inquiry response with customer name"
+    pre_recorded: false
+
+  - id: balance_inquiry_result_simple
+    pattern: "현재 잔액은 {balance}원입니다"
+    slots:
+      - balance
+    category: banking
+    description: "Simple balance inquiry response"
+    pre_recorded: false
+
+  - id: account_balance_detailed
+    pattern: "{account_type} 계좌번호 {account_number}의 잔액은 {balance}원입니다"
+    slots:
+      - account_type
+      - account_number
+      - balance
+    category: banking
+    description: "Detailed balance with account info"
+    pre_recorded: false
+
+  # Transaction templates
+  - id: transaction_deposit
+    pattern: "{amount}원이 입금되었습니다. 현재 잔액은 {balance}원입니다"
+    slots:
+      - amount
+      - balance
+    category: transaction
+    description: "Deposit notification"
+    pre_recorded: false
+
+  - id: transaction_withdrawal
+    pattern: "{amount}원이 출금되었습니다. 현재 잔액은 {balance}원입니다"
+    slots:
+      - amount
+      - balance
+    category: transaction
+    description: "Withdrawal notification"
+    pre_recorded: false
+
+  - id: transaction_history
+    pattern: "최근 거래내역은 {transaction_count}건입니다"
+    slots:
+      - transaction_count
+    category: transaction
+    description: "Transaction history count"
+    pre_recorded: false
+
+  # Error and confirmation messages (static, can be pre-recorded)
+  - id: error_account_not_found
+    pattern: "계좌를 찾을 수 없습니다. 다시 확인해주세요"
+    slots: []
+    category: error
+    description: "Account not found error"
+    pre_recorded: true
+
+  - id: error_insufficient_balance
+    pattern: "잔액이 부족합니다"
+    slots: []
+    category: error
+    description: "Insufficient balance error"
+    pre_recorded: true
+
+  - id: error_system
+    pattern: "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요"
+    slots: []
+    category: error
+    description: "System error message"
+    pre_recorded: true
+
+  - id: confirmation_yes
+    pattern: "확인되었습니다"
+    slots: []
+    category: confirmation
+    description: "Confirmation yes"
+    pre_recorded: true
+
+  - id: confirmation_no
+    pattern: "취소되었습니다"
+    slots: []
+    category: confirmation
+    description: "Confirmation no"
+    pre_recorded: true
+
+  # Help and guidance
+  - id: help_balance_check
+    pattern: "잔액 조회를 원하시면 계좌번호를 말씀해주세요"
+    slots: []
+    category: help
+    description: "Help for balance check"
+    pre_recorded: true
+
+  - id: help_transaction_history
+    pattern: "거래내역 조회를 원하시면 기간을 말씀해주세요"
+    slots: []
+    category: help
+    description: "Help for transaction history"
+    pre_recorded: true
+
+  - id: closing
+    pattern: "감사합니다. 좋은 하루 되세요"
+    slots: []
+    category: closing
+    description: "Closing message"
+    pre_recorded: true
+
+  # Frequently used phrases in banking
+  - id: please_wait
+    pattern: "잠시만 기다려주세요"
+    slots: []
+    category: general
+    description: "Please wait"
+    pre_recorded: true
+
+  - id: processing
+    pattern: "처리 중입니다"
+    slots: []
+    category: general
+    description: "Processing"
+    pre_recorded: true
+
+  - id: authentication_required
+    pattern: "본인 인증이 필요합니다"
+    slots: []
+    category: security
+    description: "Authentication required"
+    pre_recorded: true
+
+  - id: authentication_success
+    pattern: "인증되었습니다"
+    slots: []
+    category: security
+    description: "Authentication successful"
+    pre_recorded: true
+
+  # Number phrases (for amount composition)
+  - id: amount_won
+    pattern: "{amount}원"
+    slots:
+      - amount
+    category: number
+    description: "Amount in Korean Won"
+    pre_recorded: false
+
+  - id: date_format
+    pattern: "{year}년 {month}월 {day}일"
+    slots:
+      - year
+      - month
+      - day
+    category: date
+    description: "Korean date format"
+    pre_recorded: false
