@@ -46,6 +46,25 @@ audio_bytes_total = Counter(
     "hybrid_tts_audio_bytes_total", "Total audio bytes served", ["method"]
 )
 
+# TTS API Retry metrics
+tts_retry_total = Counter(
+    "hybrid_tts_api_retry_total",
+    "Total number of TTS API retry attempts",
+    ["provider", "retry_attempt"],
+)
+
+tts_retry_success_total = Counter(
+    "hybrid_tts_api_retry_success_total",
+    "Total number of successful TTS API calls after retries",
+    ["provider"],
+)
+
+tts_retry_exhausted_total = Counter(
+    "hybrid_tts_api_retry_exhausted_total",
+    "Total number of TTS API calls that failed after all retries",
+    ["provider", "error_type"],
+)
+
 
 @router.get("/metrics")
 async def prometheus_metrics():

@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # TTS Provider (google or polly)
     TTS_PROVIDER: str = "google"
 
+    # TTS API Retry Configuration
+    TTS_MAX_RETRY_ATTEMPTS: int = 3  # Maximum number of retry attempts
+    TTS_RETRY_INITIAL_WAIT_MS: int = 1000  # Initial wait time in milliseconds
+    TTS_RETRY_MAX_WAIT_MS: int = 10000  # Maximum wait time in milliseconds
+    TTS_RETRY_MULTIPLIER: float = 2.0  # Exponential backoff multiplier
+    TTS_REQUEST_TIMEOUT_SEC: int = 30  # Request timeout in seconds
+
     # Google Cloud TTS
     GOOGLE_CLOUD_PROJECT: Optional[str] = None
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None

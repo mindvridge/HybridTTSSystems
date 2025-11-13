@@ -13,6 +13,7 @@
 - **템플릿 기반 응답**: 파라메트릭 템플릿으로 유연성과 캐시 효율성 양립
 - **저지연 응답**: 캐시 히트 시 10-50ms, TTS 폴백 시 200-500ms
 - **확장 가능한 아키텍처**: FastAPI + Redis + 모듈형 설계
+- **자동 재시도 로직**: Exponential backoff를 통한 일시적 오류 자동 복구
 
 ## 아키텍처
 
@@ -93,6 +94,13 @@ cp .env.example .env
 ```env
 OPENAI_API_KEY=your-openai-api-key
 TTS_PROVIDER=google  # 또는 polly
+
+# TTS API 재시도 설정 (선택사항)
+TTS_MAX_RETRY_ATTEMPTS=3           # 최대 재시도 횟수
+TTS_RETRY_INITIAL_WAIT_MS=1000     # 초기 대기 시간 (밀리초)
+TTS_RETRY_MAX_WAIT_MS=10000        # 최대 대기 시간 (밀리초)
+TTS_RETRY_MULTIPLIER=2.0           # Exponential backoff 배수
+TTS_REQUEST_TIMEOUT_SEC=30         # 요청 타임아웃 (초)
 
 # Google Cloud TTS 사용 시
 GOOGLE_CLOUD_PROJECT=your-project-id
@@ -221,6 +229,26 @@ python examples/banking_poc.py
 - LRU 제거 정책
 - TTL 기반 만료 (기본 365일)
 - Redis 메타데이터 + 로컬 파일시스템 오디오
+
+### 4. TTS API 자동 재시도 로직
+
+네트워크 오류나 일시적인 API 장애에 대응하는 지능형 재시도 메커니즘:
+
+**재시도 대상 오류:**
+- Google Cloud TTS: `ServiceUnavailable`, `TooManyRequests`, `InternalServerError`, `DeadlineExceeded`
+- Amazon Polly: `Throttling`, `ServiceUnavailable`, `InternalError`, `RequestTimeout`
+- 네트워크 오류: `ConnectionError`, `TimeoutError`
+
+**재시도 전략:**
+- Exponential backoff: 1초 → 2초 → 4초 → ... (최대 10초)
+- 기본 최대 3회 재시도
+- 일시적 오류와 영구적 오류 자동 구분
+- 재시도 성공/실패 Prometheus 메트릭 자동 수집
+
+**메트릭:**
+- `hybrid_tts_api_retry_total`: 재시도 시도 횟수
+- `hybrid_tts_api_retry_success_total`: 재시도 후 성공 횟수
+- `hybrid_tts_api_retry_exhausted_total`: 재시도 소진 후 실패 횟수
 
 ## 성능 목표
 
