@@ -11,6 +11,8 @@ from config import settings
 from cache.manager import cache_manager
 from matching.pipeline import matching_pipeline
 from templates.loader import template_manager
+from monitoring import metrics_collector
+from api.middleware import MonitoringMiddleware
 
 # Configure structured logging
 structlog.configure(
@@ -41,10 +43,18 @@ async def lifespan(app: FastAPI):
             matching_pipeline.bulk_add_phrases(static_phrases)
             logger.info("pipeline_warmed_up", phrase_count=len(static_phrases))
 
+    # Initialize monitoring
+    logger.info("monitoring_initialized", metrics_enabled=settings.ENABLE_METRICS)
+
     yield
 
     # Shutdown
     logger.info("shutting_down_hybrid_tts_api")
+
+    # Flush metrics on shutdown
+    if settings.ENABLE_METRICS:
+        metrics_collector.flush()
+        logger.info("metrics_flushed_on_shutdown")
 
 
 # Create FastAPI app
@@ -64,12 +74,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Monitoring middleware
+if settings.ENABLE_METRICS:
+    app.add_middleware(MonitoringMiddleware)
+
 
 # Import routers
-from api.routes import synthesis, templates as template_routes
+from api.routes import synthesis, templates as template_routes, monitoring
 
 app.include_router(synthesis.router, prefix="/api/v1", tags=["synthesis"])
 app.include_router(template_routes.router, prefix="/api/v1", tags=["templates"])
+app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
 
 
 @app.get("/")
@@ -80,6 +95,8 @@ async def root():
         "version": settings.APP_VERSION,
         "status": "running",
         "docs": "/docs",
+        "dashboard": "/api/v1/monitoring/dashboard",
+        "metrics": "/api/v1/monitoring/metrics",
     }
 
 

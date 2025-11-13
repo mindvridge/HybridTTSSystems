@@ -12,6 +12,12 @@ from matching.pipeline import matching_pipeline
 from tts.provider import tts_provider
 from tts.audio_processor import audio_processor
 from templates.loader import template_manager
+from monitoring import metrics_collector
+from api.routes.monitoring import (
+    synthesis_requests_total,
+    synthesis_latency_seconds,
+    audio_bytes_total,
+)
 
 logger = structlog.get_logger()
 
@@ -83,6 +89,21 @@ async def synthesize_speech(request: SynthesisRequest):
             )
             if cached_audio:
                 latency = (time.time() - start_time) * 1000
+
+                # Record metrics
+                metrics_collector.record_synthesis(
+                    method="exact",
+                    latency_ms=latency,
+                    text_length=len(text_to_synthesize),
+                    audio_size=len(cached_audio),
+                    confidence_score=1.0,
+                )
+
+                # Update Prometheus metrics
+                synthesis_requests_total.labels(method="exact", status="success").inc()
+                synthesis_latency_seconds.labels(method="exact").observe(latency / 1000)
+                audio_bytes_total.labels(method="exact").inc(len(cached_audio))
+
                 logger.info(
                     "synthesis_cache_hit",
                     text=text_to_synthesize[:50],
@@ -110,6 +131,28 @@ async def synthesize_speech(request: SynthesisRequest):
 
                 if matched_audio:
                     latency = (time.time() - start_time) * 1000
+
+                    # Record metrics
+                    metrics_collector.record_synthesis(
+                        method=match_result.method,
+                        latency_ms=latency,
+                        text_length=len(text_to_synthesize),
+                        audio_size=len(matched_audio),
+                        confidence_score=match_result.confidence_score,
+                        matched_phrase=match_result.matched_phrase,
+                    )
+
+                    # Update Prometheus metrics
+                    synthesis_requests_total.labels(
+                        method=match_result.method, status="success"
+                    ).inc()
+                    synthesis_latency_seconds.labels(method=match_result.method).observe(
+                        latency / 1000
+                    )
+                    audio_bytes_total.labels(method=match_result.method).inc(
+                        len(matched_audio)
+                    )
+
                     logger.info(
                         "synthesis_matched",
                         method=match_result.method,
@@ -149,6 +192,20 @@ async def synthesize_speech(request: SynthesisRequest):
 
         latency = (time.time() - start_time) * 1000
 
+        # Record metrics
+        metrics_collector.record_synthesis(
+            method="tts_synthesis",
+            latency_ms=latency,
+            text_length=len(text_to_synthesize),
+            audio_size=len(audio_data),
+            confidence_score=0.0,
+        )
+
+        # Update Prometheus metrics
+        synthesis_requests_total.labels(method="tts_synthesis", status="success").inc()
+        synthesis_latency_seconds.labels(method="tts_synthesis").observe(latency / 1000)
+        audio_bytes_total.labels(method="tts_synthesis").inc(len(audio_data))
+
         logger.info(
             "synthesis_tts_complete",
             text=text_to_synthesize[:50],
@@ -167,6 +224,9 @@ async def synthesize_speech(request: SynthesisRequest):
         )
 
     except Exception as e:
+        # Record failed request
+        synthesis_requests_total.labels(method="unknown", status="error").inc()
+
         logger.error("synthesis_failed", error=str(e), text=request.text[:50])
         raise HTTPException(status_code=500, detail=f"Synthesis failed: {str(e)}")
 
