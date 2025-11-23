@@ -1,0 +1,54 @@
+# Prometheus configuration for Hybrid TTS Cost Optimizer
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'hybrid-tts-monitor'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Rule files
+rule_files:
+  - "alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+
+  # Hybrid TTS API metrics
+  - job_name: 'hybrid-tts-api'
+    static_configs:
+      - targets: ['api:8000']
+    metrics_path: /api/v1/monitoring/metrics
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    honor_labels: true
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'hybrid-tts-api'
+
+  # Redis exporter metrics
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'hybrid-tts-redis'
+
+# Remote write/read (optional, for long-term storage)
+# remote_write:
+#   - url: "http://remote-storage:9201/write"
+
+# remote_read:
+#   - url: "http://remote-storage:9201/read"

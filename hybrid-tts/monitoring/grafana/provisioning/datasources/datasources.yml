@@ -1,0 +1,25 @@
+# Grafana datasource provisioning for Hybrid TTS
+apiVersion: 1
+
+datasources:
+  # Prometheus datasource
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "10s"
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: "2.47.0"
+    version: 1
+
+  # Optional: Redis datasource (if using Grafana Redis plugin)
+  # - name: Redis
+  #   type: redis-datasource
+  #   access: proxy
+  #   url: redis://redis:6379
+  #   editable: false

@@ -1,0 +1,158 @@
+# Alerting rules for Hybrid TTS Cost Optimizer
+groups:
+  - name: hybrid-tts-alerts
+    rules:
+      # API Health Alerts
+      - alert: HybridTTSAPIDown
+        expr: up{job="hybrid-tts-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Hybrid TTS API is down"
+          description: "The Hybrid TTS API has been down for more than 1 minute."
+
+      # Cache Performance Alerts
+      - alert: LowCacheHitRate
+        expr: hybrid_tts_cache_hit_rate < 70
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cache hit rate is below target"
+          description: "Cache hit rate is {{ $value }}%, which is below the 70% target."
+
+      - alert: CriticalCacheHitRate
+        expr: hybrid_tts_cache_hit_rate < 50
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Cache hit rate critically low"
+          description: "Cache hit rate is {{ $value }}%, which is critically low."
+
+      # Latency Alerts
+      - alert: HighSynthesisLatency
+        expr: histogram_quantile(0.95, rate(hybrid_tts_synthesis_latency_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High synthesis latency detected"
+          description: "95th percentile synthesis latency is {{ $value }}s."
+
+      - alert: CriticalSynthesisLatency
+        expr: histogram_quantile(0.95, rate(hybrid_tts_synthesis_latency_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical synthesis latency"
+          description: "95th percentile synthesis latency is {{ $value }}s, exceeding critical threshold."
+
+      # Error Rate Alerts
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(hybrid_tts_synthesis_requests_total{status="error"}[5m])) /
+          sum(rate(hybrid_tts_synthesis_requests_total[5m])) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate in synthesis requests"
+          description: "Error rate is {{ $value }}% over the last 5 minutes."
+
+      - alert: CriticalErrorRate
+        expr: |
+          sum(rate(hybrid_tts_synthesis_requests_total{status="error"}[5m])) /
+          sum(rate(hybrid_tts_synthesis_requests_total[5m])) * 100 > 20
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical error rate in synthesis requests"
+          description: "Error rate is {{ $value }}%, exceeding critical threshold."
+
+      # Cost Reduction Alerts
+      - alert: LowCostReduction
+        expr: hybrid_tts_cost_reduction < 60
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cost reduction below target"
+          description: "Cost reduction is {{ $value }}%, below the 70% target."
+
+      # TTS API Retry Alerts
+      - alert: HighRetryRate
+        expr: |
+          sum(rate(hybrid_tts_api_retry_total[5m])) /
+          sum(rate(hybrid_tts_synthesis_requests_total{method="tts_synthesis"}[5m])) * 100 > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High TTS API retry rate"
+          description: "TTS API retry rate is {{ $value }}%, indicating potential issues."
+
+      - alert: TTSAPIExhaustedRetries
+        expr: rate(hybrid_tts_api_retry_exhausted_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TTS API requests exhausting retries"
+          description: "{{ $value }} requests per second are failing after exhausting all retries."
+
+  - name: redis-alerts
+    rules:
+      # Redis Health Alerts
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is down"
+          description: "Redis server has been down for more than 1 minute."
+
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis is using {{ $value }}% of max memory."
+
+      - alert: RedisTooManyConnections
+        expr: redis_connected_clients > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis has too many connections"
+          description: "Redis has {{ $value }} connected clients."
+
+  - name: http-alerts
+    rules:
+      # HTTP Request Alerts
+      - alert: HighHTTPErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) /
+          sum(rate(http_requests_total[5m])) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "HTTP 5xx error rate is {{ $value }}%."
+
+      - alert: SlowHTTPResponses
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow HTTP responses"
+          description: "95th percentile HTTP response time is {{ $value }}s."

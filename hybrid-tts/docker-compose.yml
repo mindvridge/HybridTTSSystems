@@ -14,6 +14,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    networks:
+      - hybrid-tts-network
 
   api:
     build: .
@@ -23,6 +25,7 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - ENABLE_METRICS=true
     env_file:
       - .env
     volumes:
@@ -33,6 +36,75 @@ services:
       redis:
         condition: service_healthy
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - hybrid-tts-network
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=8000"
+      - "prometheus.path=/api/v1/monitoring/metrics"
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: hybrid-tts-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - api
+    networks:
+      - hybrid-tts-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: hybrid-tts-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=hybrid-tts-admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - hybrid-tts-network
+    restart: unless-stopped
+
+  # Redis Exporter for detailed Redis metrics
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.55.0
+    container_name: hybrid-tts-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - hybrid-tts-network
+    restart: unless-stopped
+
+networks:
+  hybrid-tts-network:
+    driver: bridge
 
 volumes:
   redis_data:
+  prometheus_data:
+  grafana_data:
